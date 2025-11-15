@@ -93,17 +93,43 @@ export class StackDetectionService {
   ): Promise<Partial<DetectedStack>> {
     const dependencies = { ...packageJson?.dependencies, ...packageJson?.devDependencies };
     
-    // React-based frameworks
-    if (dependencies?.['next']) {
+    // Priority-based detection for maximum reliability
+    
+    // 1. Check for Vite first (highest priority for modern projects)
+    if (dependencies?.['vite'] || files.includes('vite.config.js') || files.includes('vite.config.ts')) {
+      const isReact = dependencies?.['react'];
+      const isVue = dependencies?.['vue'];
+      
+      return {
+        type: 'spa',
+        framework: isReact ? 'React (Vite)' : isVue ? 'Vue (Vite)' : 'Vite',
+        buildCmd: 'npm run build',
+        distDir: 'dist', // Vite ALWAYS uses dist
+      };
+    }
+    
+    // 2. Next.js detection (React-based SSR framework)
+    if (dependencies?.['next'] || files.includes('next.config.js') || files.includes('next.config.ts')) {
       return {
         type: 'ssr',
         framework: 'Next.js',
         buildCmd: 'npm run build',
-        distDir: '.next',
+        distDir: '.next', // Next.js uses .next, but deployment uses 'out' for static export
         portHint: 3000,
       };
     }
     
+    // 3. Gatsby detection (React-based static site generator)
+    if (dependencies?.['gatsby'] || files.includes('gatsby-config.js') || files.includes('gatsby-config.ts')) {
+      return {
+        type: 'static',
+        framework: 'Gatsby',
+        buildCmd: 'npm run build',
+        distDir: 'public', // Gatsby uses public directory
+      };
+    }
+    
+    // 4. Remix detection
     if (dependencies?.['@remix-run/node'] || dependencies?.['@remix-run/dev']) {
       return {
         type: 'ssr',
@@ -114,17 +140,8 @@ export class StackDetectionService {
       };
     }
     
-    if (dependencies?.['gatsby']) {
-      return {
-        type: 'static',
-        framework: 'Gatsby',
-        buildCmd: 'npm run build',
-        distDir: 'public',
-      };
-    }
-    
-    // Vue-based frameworks
-    if (dependencies?.['nuxt']) {
+    // 5. Vue-based frameworks (Nuxt)
+    if (dependencies?.['nuxt'] || files.includes('nuxt.config.js') || files.includes('nuxt.config.ts')) {
       return {
         type: 'ssr',
         framework: 'Nuxt.js',
@@ -134,6 +151,7 @@ export class StackDetectionService {
       };
     }
     
+    // 6. Vue CLI projects
     if (dependencies?.['@vue/cli-service'] || files.includes('vue.config.js')) {
       return {
         type: 'spa',
@@ -143,7 +161,7 @@ export class StackDetectionService {
       };
     }
     
-    // Angular
+    // 7. Angular projects
     if (dependencies?.['@angular/core'] || files.includes('angular.json')) {
       return {
         type: 'spa',
@@ -153,7 +171,7 @@ export class StackDetectionService {
       };
     }
     
-    // Svelte
+    // 8. Svelte projects
     if (dependencies?.['svelte']) {
       return {
         type: 'spa',
@@ -163,48 +181,37 @@ export class StackDetectionService {
       };
     }
     
-    // Node.js backends
-    if (dependencies?.['express']) {
-      return {
-        type: 'api',
-        framework: 'Express.js',
-        buildCmd: packageJson?.scripts?.build || 'npm run build',
-        portHint: 3000,
-      };
-    }
-    
-    if (dependencies?.['@nestjs/core']) {
-      return {
-        type: 'api',
-        framework: 'NestJS',
-        buildCmd: 'npm run build',
-        distDir: 'dist',
-        portHint: 3000,
-      };
-    }
-    
-    if (dependencies?.['fastify']) {
-      return {
-        type: 'api',
-        framework: 'Fastify',
-        buildCmd: packageJson?.scripts?.build || 'npm start',
-        portHint: 3000,
-      };
-    }
-    
-    // Static site generators
-    if (dependencies?.['vite']) {
-      const isReact = dependencies?.['react'];
-      const isVue = dependencies?.['vue'];
-      
+    // 9. Create React App (CRA) - uses 'build' directory
+    if (dependencies?.['react-scripts']) {
       return {
         type: 'spa',
-        framework: isReact ? 'React (Vite)' : isVue ? 'Vue (Vite)' : 'Vite',
+        framework: 'React (CRA)',
         buildCmd: 'npm run build',
+        distDir: 'build', // CRA uses build directory
+      };
+    }
+    
+    // 10. Generic React (without Vite or CRA) - assumes custom setup with 'build'
+    if (dependencies?.['react'] && !dependencies?.['next'] && !dependencies?.['gatsby']) {
+      return {
+        type: 'spa',
+        framework: 'React',
+        buildCmd: packageJson?.scripts?.build || 'npm run build',
+        distDir: 'build', // Fallback to build for generic React
+      };
+    }
+    
+    // 11. Generic Vue (without CLI or Nuxt)
+    if (dependencies?.['vue'] && !dependencies?.['nuxt']) {
+      return {
+        type: 'spa',
+        framework: 'Vue.js',
+        buildCmd: packageJson?.scripts?.build || 'npm run build',
         distDir: 'dist',
       };
     }
     
+    // 12. Static site generators (11ty, Jekyll, etc.)
     if (dependencies?.['@11ty/eleventy']) {
       return {
         type: 'static',
@@ -214,70 +221,42 @@ export class StackDetectionService {
       };
     }
     
-    // React without framework
-    if (dependencies?.['react'] && !dependencies?.['next']) {
-      return {
-        type: 'spa',
-        framework: 'React',
-        buildCmd: packageJson?.scripts?.build || 'npm run build',
-        distDir: 'build',
-      };
-    }
-    
-    // Generic Node.js project
-    if (packageJson && packageJson.main) {
-      return {
-        type: 'api',
-        framework: 'Node.js',
-        buildCmd: packageJson?.scripts?.build || null,
-        portHint: 3000,
-      };
-    }
-    
-    // Static HTML
-    if (files.includes('index.html')) {
+    // 13. Pure static HTML projects (no build process needed)
+    if (files.includes('index.html') && !packageJson) {
       return {
         type: 'static',
         framework: 'Static HTML',
+        distDir: '.', // Current directory is the build output
+      };
+    }
+    
+    // 14. Default fallback - if nothing else matches but has package.json
+    if (packageJson) {
+      // Check if there's a build script
+      const hasBuildScript = packageJson?.scripts?.build;
+      
+      if (hasBuildScript) {
+        return {
+          type: 'spa',
+          framework: 'Unknown',
+          buildCmd: 'npm run build',
+          distDir: 'dist', // Safe default for most modern projects
+        };
+      }
+      
+      // No build script - might be static or simple Node.js app
+      return {
+        type: 'static',
+        framework: 'Static',
         distDir: '.',
       };
     }
     
-    // Python projects
-    if (files.includes('requirements.txt') || files.includes('pyproject.toml')) {
-      const hasDjango = await this.checkForPattern(workspaceDir, 'django');
-      const hasFlask = await this.checkForPattern(workspaceDir, 'flask');
-      
-      if (hasDjango) {
-        return {
-          type: 'api',
-          framework: 'Django',
-          buildCmd: 'pip install -r requirements.txt',
-          portHint: 8000,
-        };
-      }
-      
-      if (hasFlask) {
-        return {
-          type: 'api',
-          framework: 'Flask',
-          buildCmd: 'pip install -r requirements.txt',
-          portHint: 5000,
-        };
-      }
-      
-      return {
-        type: 'api',
-        framework: 'Python',
-        buildCmd: 'pip install -r requirements.txt',
-        portHint: 8000,
-      };
-    }
-    
-    // Default fallback
+    // 15. Ultimate fallback - treat as static HTML
     return {
       type: 'static',
-      framework: 'Unknown',
+      framework: 'Static HTML',
+      distDir: '.',
     };
   }
 

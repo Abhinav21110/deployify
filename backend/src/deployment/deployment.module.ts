@@ -4,7 +4,9 @@ import { BullModule } from '@nestjs/bull';
 
 import { DeploymentController } from './deployment.controller';
 import { DeploymentService } from './deployment.service';
+import { LogsController } from './logs.controller';
 import { Deployment } from './entities/deployment.entity';
+import { LoggingService } from '../common/logging.service';
 
 @Module({
   imports: [
@@ -13,8 +15,8 @@ import { Deployment } from './entities/deployment.entity';
       name: 'deployment',
     }),
   ],
-  controllers: [DeploymentController],
-  providers: [DeploymentService],
-  exports: [DeploymentService],
+  controllers: [DeploymentController, LogsController],
+  providers: [DeploymentService, LoggingService],
+  exports: [DeploymentService, LoggingService],
 })
 export class DeploymentModule {}

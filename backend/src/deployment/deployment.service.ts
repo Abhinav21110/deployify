@@ -41,6 +41,9 @@ export class DeploymentService {
         environment: createDeploymentDto.environment,
         budget: createDeploymentDto.budget,
         preferProviders: createDeploymentDto.preferProviders,
+        provider: (createDeploymentDto as any).provider,
+        credentialId: (createDeploymentDto as any).credentialId,
+        config: (createDeploymentDto as any).config,
       },
       {
         attempts: 3,

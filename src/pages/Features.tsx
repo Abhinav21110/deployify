@@ -113,8 +113,6 @@ export default function Features() {
   const providers = [
     { id: 'netlify', name: 'Netlify', icon: '🌐', description: 'Static sites and JAMstack' },
     { id: 'vercel', name: 'Vercel', icon: '▲', description: 'Next.js and React apps' },
-    { id: 'digitalocean', name: 'DigitalOcean', icon: '🌊', description: 'Full-stack and APIs' },
-    { id: 'aws-amplify', name: 'AWS Amplify', icon: '☁️', description: 'Scalable web apps' },
   ];
 
   return (

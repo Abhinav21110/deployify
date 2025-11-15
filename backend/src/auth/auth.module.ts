@@ -1,6 +1,11 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { UserCredentials } from './entities/user-credentials.entity';
+import { CredentialService } from './credential.service';
+import { CredentialController } from './credential.controller';
+import { ProviderModule } from '../provider/provider.module';
 
 @Module({
   imports: [
@@ -12,8 +17,11 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
       }),
       inject: [ConfigService],
     }),
+    TypeOrmModule.forFeature([UserCredentials]),
+    ProviderModule,
   ],
-  providers: [],
-  exports: [JwtModule],
+  controllers: [CredentialController],
+  providers: [CredentialService],
+  exports: [JwtModule, CredentialService],
 })
 export class AuthModule {}

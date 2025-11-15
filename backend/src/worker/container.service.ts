@@ -235,6 +235,17 @@ export class ContainerService {
     try {
       onLog('info', `Starting build with ${buildImage}...`);
 
+      // Pull the Docker image if it doesn't exist
+      try {
+        await this.pullImageIfNeeded(buildImage, onLog);
+      } catch (pullError) {
+        onLog('error', `Failed to pull image ${buildImage}: ${pullError.message}`);
+        return {
+          success: false,
+          error: `Failed to pull Docker image: ${pullError.message}`,
+        };
+      }
+
       // Create container for building
       const container = await this.docker.createContainer({
         Image: buildImage,
@@ -337,11 +348,25 @@ export class ContainerService {
     const distDir = detectedStack.distDir || 'dist';
     const fullDistPath = path.join(workspaceDir, distDir);
 
+    this.logger.log(`Creating artifact from directory: ${distDir}`);
+    this.logger.log(`Full path: ${fullDistPath}`);
+
     try {
       await fs.access(fullDistPath);
+      this.logger.log(`Build directory exists: ${fullDistPath}`);
       return fullDistPath;
     } catch {
-      // If dist dir doesn't exist, return workspace dir
+      this.logger.warn(`Build directory '${distDir}' doesn't exist at ${fullDistPath}, using workspace root`);
+      
+      // List available directories for debugging
+      try {
+        const availableDirs = await fs.readdir(workspaceDir, { withFileTypes: true });
+        const directories = availableDirs.filter(dirent => dirent.isDirectory()).map(dirent => dirent.name);
+        this.logger.log(`Available directories in workspace: ${directories.join(', ')}`);
+      } catch (listError) {
+        this.logger.warn(`Could not list workspace directories: ${listError.message}`);
+      }
+      
       return workspaceDir;
     }
   }
@@ -404,6 +429,33 @@ export class ContainerService {
     } catch (error) {
       this.logger.error(`Failed to pull image ${imageName}: ${error.message}`);
       throw error;
+    }
+  }
+
+  private async pullImageIfNeeded(imageName: string, onLog: (level: string, message: string) => void): Promise<void> {
+    try {
+      // Check if image exists locally
+      const image = this.docker.getImage(imageName);
+      await image.inspect();
+      onLog('info', `Using existing Docker image: ${imageName}`);
+    } catch (error) {
+      // Image doesn't exist, pull it
+      onLog('info', `Pulling Docker image: ${imageName}...`);
+      
+      const stream = await this.docker.pull(imageName);
+      
+      await new Promise((resolve, reject) => {
+        this.docker.modem.followProgress(stream, (err, res) => {
+          if (err) reject(err);
+          else resolve(res);
+        }, (event) => {
+          if (event.status) {
+            onLog('info', `Pull ${imageName}: ${event.status}`);
+          }
+        });
+      });
+      
+      onLog('info', `Successfully pulled Docker image: ${imageName}`);
     }
   }
 }

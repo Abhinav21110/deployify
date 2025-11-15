@@ -32,7 +32,7 @@ import { ProviderModule } from './provider/provider.module';
     ThrottlerModule.forRoot([
       {
         ttl: 60000, // 1 minute
-        limit: 10, // 10 requests per minute
+        limit: 100, // 100 requests per minute for development
       },
     ]),
 

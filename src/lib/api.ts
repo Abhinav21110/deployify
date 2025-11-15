@@ -7,33 +7,55 @@ export interface DeploymentRequest {
   environment: 'school' | 'staging' | 'prod';
   budget: 'free' | 'low' | 'any';
   preferProviders?: string[];
+  provider?: string;
+  credentialId?: string;
+  config?: {
+    name?: string;
+    buildCommand?: string;
+    buildDirectory?: string;
+    environmentVariables?: Record<string, string>;
+  };
 }
 
 export interface DeploymentResponse {
   deploymentId: string;
+  message?: string;
+  estimatedTime?: string;
 }
 
 export interface DeploymentStatus {
   id: string;
-  status: 'queued' | 'cloning' | 'detecting' | 'building' | 'deploying' | 'success' | 'failed' | 'cancelled';
+  status: 'queued' | 'cloning' | 'building' | 'deploying' | 'success' | 'failed' | 'cancelled';
   provider?: string;
   url?: string;
-  detected?: DetectedStack;
+  analysis?: ProjectAnalysis;
   createdAt: string;
   updatedAt: string;
   error?: string;
+  metadata?: any;
 }
 
-export interface DetectedStack {
-  type: 'static' | 'spa' | 'ssr' | 'api' | 'fullstack' | 'container';
-  framework: string;
-  buildCmd?: string;
-  distDir?: string;
-  portHint?: number;
-  packageManager: 'npm' | 'yarn' | 'pnpm' | 'bun';
-  nodeVersion?: string;
-  hasDockerfile: boolean;
-  dependencies?: Record<string, string>;
+export interface ProjectAnalysis {
+  type: 'static' | 'spa' | 'react' | 'vue' | 'angular' | 'next' | 'nuxt' | 'gatsby' | 'unknown';
+  framework?: string;
+  hasPackageJson: boolean;
+  hasBuildScript: boolean;
+  buildCommand?: string;
+  buildDirectory?: string;
+  isStaticHtml: boolean;
+  estimatedSize: number;
+  dependencies?: string[];
+  environmentVariables?: string[];
+}
+
+export interface DeploymentLog {
+  id: string;
+  deploymentId: string;
+  timestamp: string;
+  level: 'info' | 'warn' | 'error' | 'success';
+  message: string;
+  step?: string;
+  metadata?: any;
 }
 
 export interface LogEvent {
@@ -51,6 +73,68 @@ export interface DeploymentListResponse {
   totalPages: number;
 }
 
+// Provider and Credential Interfaces
+export interface Provider {
+  type: string;
+  name: string;
+  supportsFreeTier: boolean;
+  maxFileSize: number;
+  supportedProjectTypes: string[];
+  configRequirements: {
+    requiredFields: string[];
+    optionalFields: string[];
+    credentialFields: string[];
+  };
+}
+
+export interface ProviderRecommendation {
+  provider: string;
+  score: number;
+  reasons: string[];
+  limitations?: string[];
+  pricing: 'free' | 'paid' | 'freemium';
+  features: {
+    customDomain: boolean;
+    https: boolean;
+    analytics: boolean;
+    buildHooks: boolean;
+    previewDeployments: boolean;
+    rollbacks: boolean;
+  };
+}
+
+export interface Credential {
+  id: string;
+  provider: string;
+  name?: string;
+  isActive: boolean;
+  isValid?: boolean;
+  lastValidated?: string;
+  createdAt: string;
+}
+
+export interface CreateCredentialDto {
+  provider: string;
+  credentials: Record<string, any>;
+  name?: string;
+}
+
+export interface UpdateCredentialDto {
+  credentials?: Record<string, any>;
+  isActive?: boolean;
+  name?: string;
+}
+
+export interface CredentialValidationResult {
+  isValid: boolean;
+  error?: string;
+  providerInfo?: {
+    name?: string;
+    accountId?: string;
+    permissions?: string[];
+  };
+}
+
 // Validation schemas
 export const deploymentRequestSchema = z.object({
   repoUrl: z.string().url().refine(
@@ -61,6 +145,8 @@ export const deploymentRequestSchema = z.object({
   environment: z.enum(['school', 'staging', 'prod']),
   budget: z.enum(['free', 'low', 'any']),
   preferProviders: z.array(z.string()).optional(),
+  provider: z.string().optional(),
+  credentialId: z.string().optional(),
 });
 
 // API client class
@@ -132,9 +218,122 @@ class ApiClient {
     return this.request<DeploymentListResponse>(`/deploy?${params}`);
   }
 
+  // Deployment logs
+  async getDeploymentLogs(
+    deploymentId: string,
+    options?: {
+      limit?: number;
+      level?: 'info' | 'warn' | 'error' | 'success';
+      search?: string;
+    }
+  ): Promise<{ deploymentId: string; logs: DeploymentLog[]; totalCount: number }> {
+    const params = new URLSearchParams();
+    if (options?.limit) params.set('limit', options.limit.toString());
+    if (options?.level) params.set('level', options.level);
+    if (options?.search) params.set('search', options.search);
+
+    return this.request<{ deploymentId: string; logs: DeploymentLog[]; totalCount: number }>(
+      `/deployments/${deploymentId}/logs?${params}`
+    );
+  }
+
+  async getDeploymentLogSummary(deploymentId: string): Promise<{
+    deploymentId: string;
+    totalLogs: number;
+    errorCount: number;
+    warningCount: number;
+    infoCount: number;
+    successCount: number;
+    duration?: number;
+    startTime?: string;
+    endTime?: string;
+  }> {
+    return this.request(`/deployments/${deploymentId}/logs/summary`);
+  }
+
+  // Provider endpoints
+  async getProviders(): Promise<{ providers: Provider[] }> {
+    return this.request<{ providers: Provider[] }>('/credentials/providers');
+  }
+
+  async getProviderRequirements(provider: string): Promise<{
+    provider: string;
+    requirements: {
+      requiredFields: string[];
+      optionalFields: string[];
+      credentialFields: string[];
+    };
+    info: {
+      name: string;
+      supportsFreeTier: boolean;
+      maxFileSize: number;
+      supportedProjectTypes: string[];
+    };
+  }> {
+    return this.request(`/credentials/providers/${provider}/requirements`);
+  }
+
+  // Credential endpoints
+  async createCredentials(data: CreateCredentialDto): Promise<{
+    message: string;
+    credential: {
+      id: string;
+      provider: string;
+      name: string;
+      isActive: boolean;
+      createdAt: string;
+    };
+  }> {
+    return this.request('/credentials', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getUserCredentials(): Promise<{ credentials: Credential[] }> {
+    return this.request<{ credentials: Credential[] }>('/credentials');
+  }
+
+  async updateCredentials(
+    credentialId: string,
+    data: UpdateCredentialDto
+  ): Promise<{
+    message: string;
+    credential: {
+      id: string;
+      provider: string;
+      name: string;
+      isActive: boolean;
+      updatedAt: string;
+    };
+  }> {
+    return this.request(`/credentials/${credentialId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteCredentials(credentialId: string): Promise<void> {
+    return this.request(`/credentials/${credentialId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async validateCredentials(credentialId: string): Promise<CredentialValidationResult> {
+    return this.request(`/credentials/${credentialId}/validate`, {
+      method: 'POST',
+    });
+  }
+
+  async validateAllCredentials(): Promise<{ message: string }> {
+    return this.request('/credentials/validate-all', {
+      method: 'POST',
+    });
+  }
+
   // Server-Sent Events for logs
   createLogStream(deploymentId: string): EventSource {
-    const url = `${this.baseURL}/deploy/${deploymentId}/logs/sse`;
+    const url = `${this.baseURL}/deployments/${deploymentId}/logs/stream`;
     return new EventSource(url);
   }
 
@@ -151,6 +350,10 @@ export const apiClient = new ApiClient();
 export const queryKeys = {
   deployment: (id: string) => ['deployment', id] as const,
   deployments: (page: number, filters?: any) => ['deployments', page, filters] as const,
+  deploymentLogs: (id: string, options?: any) => ['deployment-logs', id, options] as const,
+  providers: () => ['providers'] as const,
+  providerRequirements: (provider: string) => ['provider-requirements', provider] as const,
+  credentials: () => ['credentials'] as const,
   health: () => ['health'] as const,
 };
 
@@ -165,4 +368,20 @@ export const useDeploymentStatus = (id: string) => {
 
 export const useDeployments = (page: number = 1, filters?: any) => {
   return () => apiClient.getDeployments(page, 20, filters);
+};
+
+export const useProviders = () => {
+  return () => apiClient.getProviders();
+};
+
+export const useCredentials = () => {
+  return () => apiClient.getUserCredentials();
+};
+
+export const useCreateCredentials = () => {
+  return (data: CreateCredentialDto) => apiClient.createCredentials(data);
+};
+
+export const useDeploymentLogs = (deploymentId: string, options?: any) => {
+  return () => apiClient.getDeploymentLogs(deploymentId, options);
 };

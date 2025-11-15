@@ -1,273 +1,190 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { DetectedStack, ProviderConfig, DeploymentResult } from '../common/types';
-import { NetlifyService } from './netlify.service';
-import { VercelService } from './vercel.service';
-import { DigitalOceanService } from './digitalocean.service';
-import { AwsAmplifyService } from './aws-amplify.service';
-import { LocalService } from './local.service';
+import { ProviderRegistryService } from './provider-registry.service';
+import { DeploymentResult, ProviderCredentials, DeploymentConfig, ProjectAnalysis, ProviderRecommendation } from './dto/deployment.dto';
 
 interface ProviderSelectionOptions {
-  detected: DetectedStack;
+  analysis: ProjectAnalysis;
   environment: 'school' | 'staging' | 'prod';
   budget: 'free' | 'low' | 'any';
   preferProviders?: string[];
+  maxFileSize?: number;
 }
 
 interface DeploymentOptions {
   provider: string;
-  artifactPath: string;
-  detectedStack: DetectedStack;
-  environment: string;
+  projectPath: string;
+  config: DeploymentConfig;
+  credentials?: ProviderCredentials;
 }
 
 @Injectable()
 export class ProviderDecisionService {
   private readonly logger = new Logger(ProviderDecisionService.name);
 
-  // Provider configurations
-  private readonly providerConfigs: Record<string, ProviderConfig> = {
-    local: {
-      name: 'Local Static Hosting',
-      type: 'static',
-      costTier: 'free',
-      supportsEnvironments: ['school', 'staging', 'prod'],
-      maxBuildTime: 5,
-      frameworks: ['static', 'spa', 'gatsby', 'react', 'vue', 'angular', 'svelte', 'html'],
-    },
-    netlify: {
-      name: 'Netlify',
-      type: 'static',
-      costTier: 'free',
-      supportsEnvironments: ['school', 'staging', 'prod'],
-      maxBuildTime: 15,
-      frameworks: ['static', 'spa', 'gatsby', 'react', 'vue', 'angular', 'svelte'],
-    },
-    vercel: {
-      name: 'Vercel',
-      type: 'serverless',
-      costTier: 'free',
-      supportsEnvironments: ['school', 'staging', 'prod'],
-      maxBuildTime: 20,
-      frameworks: ['next.js', 'react', 'vue', 'angular', 'static', 'spa'],
-    },
-    digitalocean: {
-      name: 'DigitalOcean App Platform',
-      type: 'container',
-      costTier: 'low',
-      supportsEnvironments: ['staging', 'prod'],
-      maxBuildTime: 30,
-      frameworks: ['api', 'fullstack', 'container', 'node.js', 'python', 'docker'],
-    },
-    'aws-amplify': {
-      name: 'AWS Amplify',
-      type: 'static',
-      costTier: 'low',
-      supportsEnvironments: ['staging', 'prod'],
-      maxBuildTime: 25,
-      frameworks: ['react', 'vue', 'angular', 'static', 'spa'],
-    },
-  };
-
-  constructor(
-    private netlifyService: NetlifyService,
-    private vercelService: VercelService,
-    private digitalOceanService: DigitalOceanService,
-    private awsAmplifyService: AwsAmplifyService,
-    private localService: LocalService,
-  ) {}
+  constructor(private readonly providerRegistry: ProviderRegistryService) {}
 
   async selectProvider(options: ProviderSelectionOptions): Promise<string> {
-    const { detected, environment, budget, preferProviders } = options;
+    const { analysis, preferProviders } = options;
 
     try {
-      // Filter providers based on constraints
-      const eligibleProviders = this.filterProviders(detected, environment, budget);
-
-      // Apply user preferences
-      let selectedProvider: string;
-
+      // Simplified provider selection for Netlify and Vercel only
+      
+      // User preference takes priority
       if (preferProviders && preferProviders.length > 0) {
-        const preferredEligible = eligibleProviders.filter(p => 
-          preferProviders.includes(p)
-        );
-        
-        if (preferredEligible.length > 0) {
-          selectedProvider = preferredEligible[0];
-        } else {
-          selectedProvider = eligibleProviders[0];
+        const preferred = preferProviders[0];
+        if (preferred === 'netlify' || preferred === 'vercel') {
+          this.logger.log(`Selected user-preferred provider: ${preferred}`);
+          return preferred;
         }
-      } else {
-        selectedProvider = this.getBestProvider(eligibleProviders, detected, budget);
       }
 
-      if (!selectedProvider) {
-        throw new Error('No suitable deployment provider found');
+      // Smart defaults based on project type
+      // Next.js projects work best on Vercel (made by Vercel team)
+      if (analysis.framework === 'next' || analysis.type === 'next') {
+        this.logger.log('Selected provider: vercel for Next.js project');
+        return 'vercel';
       }
 
-      this.logger.log(
-        `Selected provider: ${selectedProvider} for ${detected.framework} (${detected.type})`,
-      );
+      // Static HTML projects work great on Netlify
+      if (analysis.isStaticHtml || analysis.type === 'static') {
+        this.logger.log('Selected provider: netlify for static project');
+        return 'netlify';
+      }
 
-      return selectedProvider;
+      // Default to Vercel for SPAs (React, Vue, etc.)
+      this.logger.log(`Selected provider: vercel for ${analysis.type} project`);
+      return 'vercel';
     } catch (error) {
       this.logger.error('Provider selection failed:', error);
-      throw new Error(`Failed to select provider: ${error.message}`);
+      // Default fallback to Vercel
+      return 'vercel';
     }
   }
 
+  async getProviderRecommendations(
+    analysis: ProjectAnalysis,
+    preferFreeTier: boolean = true,
+    maxFileSize?: number,
+  ): Promise<ProviderRecommendation[]> {
+    return this.providerRegistry.recommendProviders(analysis, preferFreeTier, maxFileSize);
+  }
+
   async deployToProvider(options: DeploymentOptions): Promise<DeploymentResult> {
-    const { provider, artifactPath, detectedStack, environment } = options;
+    const { provider, projectPath, config, credentials } = options;
 
     try {
+      // Only accept Netlify or Vercel
+      if (provider !== 'netlify' && provider !== 'vercel') {
+        throw new Error(`Provider ${provider} is not supported. Only 'netlify' and 'vercel' are available.`);
+      }
+
       this.logger.log(`Deploying to ${provider}...`);
 
-      let result: DeploymentResult;
-
-      switch (provider) {
-        case 'local':
-          result = await this.localService.deploy(artifactPath, detectedStack, environment);
-          break;
-          
-        case 'netlify':
-          result = await this.netlifyService.deploy(artifactPath, detectedStack, environment);
-          break;
-          
-        case 'vercel':
-          result = await this.vercelService.deploy(artifactPath, detectedStack, environment);
-          break;
-          
-        case 'digitalocean':
-          result = await this.digitalOceanService.deploy(artifactPath, detectedStack, environment);
-          break;
-          
-        case 'aws-amplify':
-          result = await this.awsAmplifyService.deploy(artifactPath, detectedStack, environment);
-          break;
-          
-        default:
-          throw new Error(`Unknown provider: ${provider}`);
+      const deploymentProvider = this.providerRegistry.getProvider(provider);
+      if (!deploymentProvider) {
+        throw new Error(`Provider ${provider} not found`);
       }
 
-      // If external provider fails, fallback to local hosting
-      if (!result.success && provider !== 'local') {
-        this.logger.warn(`${provider} deployment failed, falling back to local hosting`);
-        result = await this.localService.deploy(artifactPath, detectedStack, environment);
+      // Validate credentials if provided
+      if (credentials && !(await deploymentProvider.validateCredentials(credentials))) {
+        throw new Error(`Invalid credentials for provider ${provider}`);
       }
+
+      // Deploy to the provider
+      const result = await deploymentProvider.deploy(projectPath, config, credentials);
 
       return result;
     } catch (error) {
       this.logger.error(`Deployment to ${provider} failed:`, error);
       
-      // Try local hosting as fallback
-      if (provider !== 'local') {
-        this.logger.warn('Attempting local hosting as fallback...');
-        try {
-          return await this.localService.deploy(artifactPath, detectedStack, environment);
-        } catch (fallbackError) {
-          this.logger.error('Local hosting fallback also failed:', fallbackError);
-        }
-      }
-      
       return {
         success: false,
         error: error.message,
+        provider,
+        timestamp: new Date(),
       };
     }
   }
 
-  private filterProviders(
-    detected: DetectedStack,
-    environment: string,
-    budget: string,
-  ): string[] {
-    return Object.entries(this.providerConfigs)
-      .filter(([_, config]) => {
-        // Check environment support
-        if (!config.supportsEnvironments.includes(environment as any)) {
-          return false;
-        }
-
-        // Check budget constraints
-        if (budget === 'free' && config.costTier !== 'free') {
-          return false;
-        }
-
-        // Check framework compatibility
-        const frameworkLower = detected.framework?.toLowerCase() || '';
-        const typeLower = detected.type?.toLowerCase() || '';
-        
-        return config.frameworks.some(fw => 
-          frameworkLower.includes(fw) || 
-          typeLower.includes(fw) ||
-          fw === detected.type
-        );
-      })
-      .map(([name]) => name);
-  }
-
-  private getBestProvider(
-    eligibleProviders: string[],
-    detected: DetectedStack,
-    budget: string,
-  ): string {
-    // Decision matrix based on project type and framework
-    const priorities: Record<string, string[]> = {
-      // Static sites and SPAs - prioritize local for development/testing
-      static: ['local', 'netlify', 'aws-amplify', 'vercel'],
-      spa: ['local', 'netlify', 'vercel', 'aws-amplify'],
-      
-      // Server-side rendering
-      ssr: ['vercel', 'digitalocean', 'aws-amplify', 'local'],
-      
-      // APIs and backends
-      api: ['digitalocean', 'vercel', 'local'],
-      
-      // Full-stack applications
-      fullstack: ['digitalocean', 'vercel', 'local'],
-      
-      // Container-based applications
-      container: ['digitalocean', 'local'],
-    };
-
-    const typePriorities = priorities[detected.type] || priorities.static;
-    
-    // Framework-specific overrides
-    const frameworkLower = detected.framework?.toLowerCase() || '';
-    
-    if (frameworkLower.includes('next.js') || frameworkLower.includes('next')) {
-      return eligibleProviders.find(p => p === 'vercel') || 
-             eligibleProviders.find(p => p === 'local') || 
-             eligibleProviders[0];
-    }
-    
-    if (frameworkLower.includes('gatsby')) {
-      return eligibleProviders.find(p => p === 'netlify') || 
-             eligibleProviders.find(p => p === 'local') || 
-             eligibleProviders[0];
-    }
-    
-    if (detected.hasDockerfile) {
-      return eligibleProviders.find(p => p === 'digitalocean') || 
-             eligibleProviders.find(p => p === 'local') || 
-             eligibleProviders[0];
-    }
-
-    // Find the highest priority provider that's eligible
-    for (const provider of typePriorities) {
-      if (eligibleProviders.includes(provider)) {
-        return provider;
+  async validateProviderCredentials(provider: string, credentials: ProviderCredentials): Promise<boolean> {
+    try {
+      const deploymentProvider = this.providerRegistry.getProvider(provider);
+      if (!deploymentProvider) {
+        return false;
       }
+
+      return await deploymentProvider.validateCredentials(credentials);
+    } catch (error) {
+      this.logger.error(`Failed to validate credentials for ${provider}:`, error);
+      return false;
+    }
+  }
+
+  async getDeploymentStatus(
+    provider: string,
+    deploymentId: string,
+    credentials?: ProviderCredentials,
+  ): Promise<{
+    status: 'pending' | 'building' | 'success' | 'failed';
+    url?: string;
+    error?: string;
+    logs?: string[];
+  }> {
+    try {
+      const deploymentProvider = this.providerRegistry.getProvider(provider);
+      if (!deploymentProvider) {
+        return { status: 'failed', error: `Provider ${provider} not found` };
+      }
+
+      return await deploymentProvider.getDeploymentStatus(deploymentId, credentials);
+    } catch (error) {
+      this.logger.error(`Failed to get deployment status from ${provider}:`, error);
+      return { status: 'failed', error: error.message };
+    }
+  }
+
+  async deleteDeployment(
+    provider: string,
+    deploymentId: string,
+    credentials?: ProviderCredentials,
+  ): Promise<boolean> {
+    try {
+      const deploymentProvider = this.providerRegistry.getProvider(provider);
+      if (!deploymentProvider) {
+        return false;
+      }
+
+      return await deploymentProvider.deleteDeployment(deploymentId, credentials);
+    } catch (error) {
+      this.logger.error(`Failed to delete deployment from ${provider}:`, error);
+      return false;
+    }
+  }
+
+  getAllProviders() {
+    return this.providerRegistry.getAllProviders().map(provider => ({
+      name: provider.name,
+      type: provider.type,
+      supportsFreeTier: provider.supportsFreeTier,
+      maxFileSize: provider.maxFileSize,
+      supportedProjectTypes: provider.supportedProjectTypes,
+      configRequirements: provider.getConfigRequirements(),
+    }));
+  }
+
+  getProviderInfo(providerType: string) {
+    const provider = this.providerRegistry.getProvider(providerType);
+    if (!provider) {
+      return null;
     }
 
-    // Fallback to local or first eligible provider
-    return eligibleProviders.find(p => p === 'local') || eligibleProviders[0] || 'local';
-  }
-
-  getProviderInfo(providerName: string): ProviderConfig | undefined {
-    return this.providerConfigs[providerName];
-  }
-
-  getAllProviders(): Record<string, ProviderConfig> {
-    return { ...this.providerConfigs };
+    return {
+      name: provider.name,
+      type: provider.type,
+      supportsFreeTier: provider.supportsFreeTier,
+      maxFileSize: provider.maxFileSize,
+      supportedProjectTypes: provider.supportedProjectTypes,
+      configRequirements: provider.getConfigRequirements(),
+    };
   }
 }

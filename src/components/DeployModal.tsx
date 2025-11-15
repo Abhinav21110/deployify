@@ -59,7 +59,7 @@ export function DeployModal({ isOpen, onClose, deploymentId }: DeployModalProps)
     enabled: isOpen && !!deploymentId,
     refetchInterval: (query) => {
       const data = query.state.data as DeploymentStatus | undefined;
-      return data && ['queued', 'cloning', 'detecting', 'building', 'deploying'].includes(data.status) ? 2000 : false;
+      return data && ['queued', 'cloning', 'detecting', 'building', 'deploying'].includes(data.status) ? 5000 : false;
     },
   });
 
@@ -153,11 +153,11 @@ export function DeployModal({ isOpen, onClose, deploymentId }: DeployModalProps)
           <div className="grid grid-cols-2 gap-4 p-4 bg-muted/50 rounded-lg">
             <div>
               <h4 className="font-medium mb-2">Project Details</h4>
-              {deployment.detected && (
+              {deployment.analysis && (
                 <div className="space-y-1 text-sm text-muted-foreground">
-                  <div>Framework: {deployment.detected.framework}</div>
-                  <div>Type: {deployment.detected.type}</div>
-                  <div>Package Manager: {deployment.detected.packageManager}</div>
+                  <div>Framework: {deployment.analysis.framework}</div>
+                  <div>Type: {deployment.analysis.type}</div>
+                  <div>Build Command: {deployment.analysis.buildCommand}</div>
                 </div>
               )}
             </div>

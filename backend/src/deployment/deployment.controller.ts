@@ -47,7 +47,10 @@ export class DeploymentController {
         throw new BadRequestException('Repository URL must be a valid GitHub repository');
       }
 
-      const deployment = await this.deploymentService.createDeployment(createDeploymentDto);
+      // Enhanced deployment creation with provider credentials and configuration
+      const deployment = await this.deploymentService.createDeployment({
+        ...createDeploymentDto,
+      });
       
       return {
         deploymentId: deployment.id,

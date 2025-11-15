@@ -5,8 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Settings2, Bell, Shield, Zap, Database } from 'lucide-react';
+import { Settings2, Bell, Shield, Zap, Database, Key } from 'lucide-react';
 import { toast } from 'sonner';
+import { CredentialsManager } from '@/components/CredentialsManager';
 
 export default function Settings() {
   useBlurReveal();
@@ -37,6 +38,20 @@ export default function Settings() {
         </div>
 
         <div className="space-y-8">
+          {/* Provider Credentials */}
+          <div className="blur-reveal">
+            <Card className="p-8 glass-card">
+              <div className="flex items-center gap-4 mb-6">
+                <Key className="h-6 w-6 text-cyan-400" />
+                <h2 className="text-2xl font-display font-bold" style={{color: '#e8e8f0'}}>Provider Credentials</h2>
+              </div>
+              <p className="text-sm mb-6" style={{color: '#b8b8c8'}}>
+                Add and manage your deployment provider credentials (Netlify, Vercel, etc.)
+              </p>
+              <CredentialsManager />
+            </Card>
+          </div>
+
           {/* Account Settings */}
           <div className="blur-reveal">
             <Card className="p-8 glass-card">

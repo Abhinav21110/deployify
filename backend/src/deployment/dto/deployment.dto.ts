@@ -47,6 +47,33 @@ export class CreateDeploymentDto {
   @IsArray()
   @IsString({ each: true })
   preferProviders?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Specific provider to use',
+    example: 'netlify',
+  })
+  @IsOptional()
+  @IsString()
+  provider?: string;
+
+  @ApiPropertyOptional({
+    description: 'Credential ID to use for deployment',
+    example: 'cred_1234567890',
+  })
+  @IsOptional()
+  @IsString()
+  credentialId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Deployment configuration',
+  })
+  @IsOptional()
+  config?: {
+    name?: string;
+    buildCommand?: string;
+    buildDirectory?: string;
+    environmentVariables?: Record<string, string>;
+  };
 }
 
 export class DeploymentResponseDto {
